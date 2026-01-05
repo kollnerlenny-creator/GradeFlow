@@ -1,47 +1,27 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc, runTransaction, updateDoc } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from 'recharts';
-import { Home, LayoutGrid, TrendingUp, Plus, ArrowLeft, Settings, X, GraduationCap, ChevronRight, Zap, Percent, Sliders } from 'lucide-react';
+import { Home, LayoutGrid, TrendingUp, Plus, ArrowLeft, Settings, X, GraduationCap, ChevronRight, Zap, Percent, Sliders, RefreshCw } from 'lucide-react';
 
-// --- Firebase Setup ---
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'grade-flow-app';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-let db, auth;
-if (firebaseConfig) {
-  const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
-  auth = getAuth(app);
-}
+// --- SheetsDB Konfiguration ---
+// Ersetze 'DEINE_API_ID' mit deiner echten ID von sheetsdb.io
+const SHEETSDB_API_ID = 'lu9rn3kh5hok9'; 
+const API_URL = `https://sheetsdb.io/api/v1/${SHEETSDB_API_ID}`;
 
 const HALF_YEARS = ['11/1', '11/2', '12/1', '12/2'];
-const SUBJECT_COLORS = [
-  '#6366f1', '#f87171', '#fb923c', '#facc15', '#4ade80', 
-  '#2dd4bf', '#38bdf8', '#60a5fa', '#a78bfa', '#f472b6'
-];
+const SUBJECT_COLORS = ['#6366f1', '#f87171', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#38bdf8', '#60a5fa', '#a78bfa', '#f472b6'];
 const GRADE_TYPES = { EXAM: 'Klausur', OTHER: 'Sonstige Leistung' };
 
 const pointsToGrade = (p) => p !== null ? (17 - p) / 3 : null;
 
 // --- UI Komponenten ---
 const AppleToggle = ({ enabled, setEnabled }) => (
-  <button
-    onClick={() => setEnabled(!enabled)}
-    className={`${enabled ? 'bg-green-500' : 'bg-gray-600'} relative inline-flex h-7 w-12 items-center rounded-full transition-all focus:outline-none shadow-inner`}
-  >
-    <span className={`${enabled ? 'translate-x-6' : 'translate-x-1'} inline-block h-5 w-5 transform rounded-full bg-white transition-transform duration-300 ease-in-out shadow-md`} />
+  <button onClick={() => setEnabled(!enabled)} className={`${enabled ? 'bg-green-500' : 'bg-gray-600'} relative inline-flex h-7 w-12 items-center rounded-full transition-all shadow-inner`}>
+    <span className={`${enabled ? 'translate-x-6' : 'translate-x-1'} inline-block h-5 w-5 transform rounded-full bg-white transition-transform shadow-md`} />
   </button>
 );
 
 const AppleGlassCard = ({ children, className = '', onClick = null, style = {} }) => (
-  <div 
-    style={style}
-    className={`bg-[#1c1c1e]/60 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-7 shadow-[0_25px_60px_rgba(0,0,0,0.4)] transition-all duration-500 cubic-bezier(0.16, 1, 0.3, 1) ${onClick ? 'cursor-pointer hover:bg-[#2c2c2e]/80 active:scale-[0.98]' : ''} ${className}`}
-    onClick={onClick}
-  >
+  <div style={style} className={`bg-[#1c1c1e]/60 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-7 shadow-xl transition-all duration-500 ${onClick ? 'cursor-pointer hover:bg-[#2c2c2e]/80 active:scale-[0.98]' : ''} ${className}`} onClick={onClick}>
     {children}
   </div>
 );
@@ -49,11 +29,11 @@ const AppleGlassCard = ({ children, className = '', onClick = null, style = {} }
 const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center p-0 md:p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className="bg-[#121214] border-t md:border border-white/10 w-full max-w-lg rounded-t-[3.5rem] md:rounded-[3.5rem] p-10 shadow-2xl max-h-[92vh] overflow-y-auto no-scrollbar animate-in slide-in-from-bottom-10 duration-500 cubic-bezier(0.16, 1, 0.3, 1)">
+    <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center p-0 md:p-6 bg-black/80 backdrop-blur-xl animate-in fade-in">
+      <div className="bg-[#121214] border-t md:border border-white/10 w-full max-w-lg rounded-t-[3.5rem] md:rounded-[3.5rem] p-10 shadow-2xl max-h-[92vh] overflow-y-auto no-scrollbar">
         <div className="flex justify-between items-center mb-8 sticky top-0 bg-[#121214] z-10 pb-2">
-          <h2 className="text-3xl font-extrabold text-white tracking-tight">{title}</h2>
-          <button onClick={onClose} className="p-3 bg-white/5 hover:bg-white/10 rounded-full text-white/40 transition-colors"><X size={24}/></button>
+          <h2 className="text-3xl font-extrabold text-white">{title}</h2>
+          <button onClick={onClose} className="p-3 bg-white/5 rounded-full text-white/40"><X size={24}/></button>
         </div>
         {children}
       </div>
@@ -62,8 +42,8 @@ const Modal = ({ isOpen, onClose, title, children }) => {
 };
 
 const App = () => {
-  const [user, setUser] = useState(null);
   const [subjects, setSubjects] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [currentTab, setCurrentTab] = useState('home'); 
   const [selectedHalfYear, setSelectedHalfYear] = useState('11/1');
   const [selectedSubject, setSelectedSubject] = useState(null);
@@ -75,27 +55,31 @@ const App = () => {
   const [gradeForm, setGradeForm] = useState({ id: null, points: 10, type: GRADE_TYPES.EXAM, note: '', date: new Date().toISOString().split('T')[0] });
   const [subjectForm, setSubjectForm] = useState({ name: '', isLK: false, color: SUBJECT_COLORS[0], examWeight: 50 });
 
-  useEffect(() => {
-    if (!auth) return;
-    const initAuth = async () => {
-      try {
-        if (initialAuthToken) await signInWithCustomToken(auth, initialAuthToken);
-        else await signInAnonymously(auth);
-      } catch (e) { console.error("Auth failed", e); }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
-  }, []);
+  // Daten von SheetsDB laden
+  const fetchSubjects = async () => {
+    if (!SHEETSDB_API_ID) return;
+    setLoading(true);
+    try {
+      const response = await fetch(API_URL);
+      const data = await response.json();
+      // Wir wandeln den String aus der "grades" Spalte zurück in ein Array
+      const formattedData = data.map(item => ({
+        ...item,
+        isLK: item.isLK === "true" || item.isLK === true,
+        examWeight: parseInt(item.examWeight) || 50,
+        grades: item.grades ? JSON.parse(item.grades) : []
+      }));
+      setSubjects(formattedData);
+    } catch (e) {
+      console.error("Fehler beim Laden von SheetsDB", e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (!user || !db) return;
-    const q = collection(db, 'artifacts', appId, 'users', user.uid, 'subjects');
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setSubjects(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => console.error("Firestore Error:", error));
-    return () => unsubscribe();
-  }, [user]);
+    fetchSubjects();
+  }, []);
 
   const processedData = useMemo(() => {
     const semesterSubjects = subjects.map(s => {
@@ -114,21 +98,16 @@ const App = () => {
       else if (avgExams !== null) final = avgExams;
       else if (avgOthers !== null) final = avgOthers;
 
-      const trendData = [...grades]
-        .sort((a, b) => new Date(a.date) - new Date(b.date))
-        .map(g => ({
-          date: new Date(g.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
-          points: g.points,
-          type: g.type
-        }));
-
       return { 
         ...s, 
         semesterGrades: grades, 
         finalPoints: final, 
         finalGrade: pointsToGrade(final),
-        weight: s.isLK ? 2 : 1, // LK zählt doppelt
-        trendData
+        weight: s.isLK ? 2 : 1,
+        trendData: [...grades].sort((a, b) => new Date(a.date) - new Date(b.date)).map(g => ({
+          date: new Date(g.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
+          points: g.points
+        }))
       };
     });
 
@@ -149,354 +128,159 @@ const App = () => {
   }, [subjects, selectedHalfYear]);
 
   const handleSaveSubject = async () => {
-    if (!user || !db || !subjectForm.name) return;
+    if (!SHEETSDB_API_ID || !subjectForm.name) return;
+    const newId = crypto.randomUUID();
+    const payload = {
+      id: newId,
+      ...subjectForm,
+      grades: JSON.stringify([]) // Als String für Sheets speichern
+    };
+
     try {
-      if (isSettingsModalOpen && selectedSubject) {
-        const subjectRef = doc(db, 'artifacts', appId, 'users', user.uid, 'subjects', selectedSubject.id);
-        await updateDoc(subjectRef, { ...subjectForm });
-        setSelectedSubject(prev => prev ? { ...prev, ...subjectForm } : null);
-        setIsSettingsModalOpen(false);
-      } else {
-        const docRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'subjects'));
-        await setDoc(docRef, { ...subjectForm, grades: [] });
-        setIsSubjectModalOpen(false);
-      }
-      setSubjectForm({ name: '', isLK: false, color: SUBJECT_COLORS[0], examWeight: 50 });
-    } catch (e) { console.error("Speichern fehlgeschlagen", e); }
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: [payload] })
+      });
+      setIsSubjectModalOpen(false);
+      fetchSubjects();
+    } catch (e) { console.error(e); }
   };
 
   const handleSaveGrade = async () => {
-    if (!user || !db || !selectedSubject) return;
+    if (!selectedSubject) return;
+    const newGrade = { ...gradeForm, id: gradeForm.id || crypto.randomUUID(), semester: selectedHalfYear };
+    const updatedGrades = gradeForm.id 
+        ? selectedSubject.grades.map(g => g.id === gradeForm.id ? newGrade : g)
+        : [...selectedSubject.grades, newGrade];
+
     try {
-      const subjectRef = doc(db, 'artifacts', appId, 'users', user.uid, 'subjects', selectedSubject.id);
-      await runTransaction(db, async (transaction) => {
-        const snap = await transaction.get(subjectRef);
-        if (!snap.exists()) return;
-        const currentGrades = snap.data().grades || [];
-        const newGrade = { ...gradeForm, id: gradeForm.id || crypto.randomUUID(), semester: selectedHalfYear };
-        const updatedGrades = gradeForm.id ? currentGrades.map(g => g.id === gradeForm.id ? newGrade : g) : [...currentGrades, newGrade];
-        transaction.update(subjectRef, { grades: updatedGrades });
+      // SheetsDB Update: Wir suchen per ID und patchen die "grades" Spalte
+      await fetch(`${API_URL}/id/${selectedSubject.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { grades: JSON.stringify(updatedGrades) } })
       });
       setIsGradeModalOpen(false);
-      setGradeForm({ id: null, points: 10, type: GRADE_TYPES.EXAM, note: '', date: new Date().toISOString().split('T')[0] });
-    } catch (e) { console.error("Note speichern fehlgeschlagen", e); }
+      fetchSubjects();
+      // Update lokales State für flüssiges UI
+      const updatedSubject = {...selectedSubject, grades: updatedGrades};
+      setSelectedSubject(updatedSubject);
+    } catch (e) { console.error(e); }
   };
 
   const handleDeleteSubject = async () => {
-    if (!user || !db || !selectedSubject) return;
+    if (!selectedSubject) return;
     try {
-      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'subjects', selectedSubject.id));
+      await fetch(`${API_URL}/id/${selectedSubject.id}`, { method: 'DELETE' });
       setSelectedSubject(null);
       setIsSettingsModalOpen(false);
-    } catch (e) { console.error("Löschen fehlgeschlagen", e); }
+      fetchSubjects();
+    } catch (e) { console.error(e); }
   };
 
   const activeSubjectData = processedData.semesterSubjects.find(s => s.id === selectedSubject?.id);
 
-  if (!firebaseConfig) return <div className="flex h-screen items-center justify-center text-white/20 font-black uppercase tracking-widest animate-pulse">Konfiguration fehlt...</div>;
-
   return (
-    <div className="min-h-screen bg-[#09090b] text-white font-sans selection:bg-indigo-500/30 pb-32 overflow-x-hidden">
-      <div className="max-w-7xl mx-auto px-6 md:px-12 pt-12">
+    <div className="min-h-screen bg-[#09090b] text-white font-sans pb-32">
+      <div className="max-w-7xl mx-auto px-6 pt-12">
         
-        <header className="mb-14 space-y-10 animate-in fade-in slide-in-from-top-4 duration-1000">
+        <header className="mb-14 space-y-10">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-5">
-              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-4 rounded-[1.75rem] shadow-2xl shadow-indigo-500/40 ring-1 ring-white/20">
-                <GraduationCap size={28} className="text-white" />
+              <div className="bg-indigo-600 p-4 rounded-[1.75rem]">
+                <GraduationCap size={28} />
               </div>
-              <div>
-                <h1 className="text-3xl md:text-4xl font-black tracking-tight bg-gradient-to-r from-white via-white to-white/40 bg-clip-text text-transparent">GradeFlow</h1>
-                <p className="text-white/30 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Gymnasiale Oberstufe • Gewichtet & LK-Fokus</p>
-              </div>
+              <h1 className="text-3xl font-black">GradeFlow <span className="text-xs text-white/20 font-normal">SheetsDB Edition</span></h1>
             </div>
+            <button onClick={fetchSubjects} className={`p-3 rounded-full bg-white/5 ${loading ? 'animate-spin' : ''}`}>
+                <RefreshCw size={20} />
+            </button>
           </div>
 
-          <div className="max-w-md mx-auto bg-[#1c1c1e]/80 backdrop-blur-md p-1.5 rounded-[2rem] flex ring-1 ring-white/10 relative shadow-2xl">
-            <div 
-                className="absolute top-1.5 bottom-1.5 bg-white shadow-xl shadow-white/20 rounded-[1.65rem] transition-all duration-500 cubic-bezier(0.16, 1, 0.3, 1)"
-                style={{ width: `calc(100% / 4 - 3px)`, left: `calc(${HALF_YEARS.indexOf(selectedHalfYear)} * 100% / 4 + 1.5px)` }}
-            />
+          <div className="max-w-md mx-auto bg-[#1c1c1e] p-1.5 rounded-[2rem] flex ring-1 ring-white/10 relative">
+            <div className="absolute top-1.5 bottom-1.5 bg-white rounded-[1.65rem] transition-all duration-300" style={{ width: `calc(100% / 4 - 3px)`, left: `calc(${HALF_YEARS.indexOf(selectedHalfYear)} * 100% / 4 + 1.5px)` }} />
             {HALF_YEARS.map(s => (
-                <button key={s} onClick={() => setSelectedHalfYear(s)} className={`flex-1 py-3.5 text-[11px] font-black uppercase tracking-widest relative z-10 transition-colors duration-500 ${selectedHalfYear === s ? 'text-black' : 'text-white/30 hover:text-white/60'}`}>
-                    {s}
-                </button>
+                <button key={s} onClick={() => setSelectedHalfYear(s)} className={`flex-1 py-3 text-[11px] font-black relative z-10 ${selectedHalfYear === s ? 'text-black' : 'text-white/30'}`}>{s}</button>
             ))}
           </div>
         </header>
 
-        <main className="animate-in fade-in duration-700">
+        {!SHEETSDB_API_ID && (
+            <div className="bg-yellow-500/10 border border-yellow-500/20 p-6 rounded-2xl mb-8 text-yellow-200 text-sm">
+                Hinweis: Bitte trage deine <b>SHEETSDB_API_ID</b> im Code ein, um die Datenbank zu verbinden.
+            </div>
+        )}
+
+        <main>
           {selectedSubject ? (
             <div className="space-y-8">
-              <button onClick={() => setSelectedSubject(null)} className="flex items-center space-x-3 text-white/40 hover:text-white transition-all text-sm font-bold bg-white/5 px-6 py-3 rounded-full border border-white/5 group shadow-lg">
-                <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" /> <span>Zurück</span>
+              <button onClick={() => setSelectedSubject(null)} className="flex items-center space-x-2 text-white/40 hover:text-white bg-white/5 px-6 py-3 rounded-full">
+                <ArrowLeft size={16} /> <span>Zurück</span>
               </button>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                <div className="lg:col-span-2 space-y-8">
-                  <AppleGlassCard style={{ borderLeft: `12px solid ${selectedSubject.color}`, boxShadow: `0 20px 50px -10px ${selectedSubject.color}33` }}>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h2 className="text-4xl md:text-5xl font-black tracking-tighter" style={{ color: selectedSubject.color }}>{selectedSubject.name}</h2>
-                        <div className="flex flex-wrap items-center gap-3 mt-4">
-                          <span className="bg-white/5 text-white/60 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/5">{selectedSubject.isLK ? 'Leistungskurs (2x)' : 'Grundkurs (1x)'}</span>
-                          <span className="bg-white/5 text-white/60 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/5 flex items-center gap-2">
-                              <Percent size={12} className="text-indigo-400"/> {selectedSubject.examWeight || 50}% Klausur
-                          </span>
-                        </div>
-                      </div>
-                      <button onClick={() => {
-                        setSubjectForm({ name: selectedSubject.name, isLK: selectedSubject.isLK, color: selectedSubject.color, examWeight: selectedSubject.examWeight || 50 });
-                        setIsSettingsModalOpen(true);
-                      }} className="p-4 bg-white/5 hover:bg-white/10 rounded-[1.5rem] text-white/40 transition-all border border-white/5 active:scale-90 shadow-lg"><Settings size={22}/></button>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2">
+                  <AppleGlassCard style={{ borderLeft: `12px solid ${selectedSubject.color}` }}>
+                    <div className="flex justify-between">
+                      <h2 className="text-4xl font-black">{selectedSubject.name}</h2>
+                      <button onClick={() => setIsSettingsModalOpen(true)} className="p-4 bg-white/5 rounded-2xl"><Settings size={22}/></button>
                     </div>
-
-                    <div className="mt-10 pt-6 border-t border-white/5">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/20 mb-6 flex items-center gap-2">
-                         <TrendingUp size={12} /> Notenverlauf
-                      </p>
-                      <div className="h-64 w-full">
-                        {activeSubjectData?.trendData.length > 0 ? (
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={activeSubjectData.trendData}>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
-                              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 'bold'}} dy={10} />
-                              <YAxis domain={[0, 15]} axisLine={false} tickLine={false} tick={{fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 'bold'}} ticks={[0, 5, 10, 15]} />
-                              <Tooltip contentStyle={{ backgroundColor: '#1c1c1e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', fontSize: '12px', fontWeight: 'bold' }} itemStyle={{ color: selectedSubject.color }} />
-                              <Line type="monotone" dataKey="points" stroke={selectedSubject.color} strokeWidth={5} dot={{ r: 6, fill: selectedSubject.color, strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 8, strokeWidth: 0 }} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        ) : (
-                          <div className="h-full flex items-center justify-center text-white/10 text-sm italic">Noch keine Daten vorhanden</div>
-                        )}
-                      </div>
+                    <div className="mt-8 flex gap-3">
+                        <span className="text-[10px] font-black uppercase bg-white/5 px-3 py-1 rounded-full">{selectedSubject.isLK ? 'Leistungskurs' : 'Grundkurs'}</span>
+                        <span className="text-[10px] font-black uppercase bg-white/5 px-3 py-1 rounded-full">{selectedSubject.examWeight}% Klausur</span>
                     </div>
                   </AppleGlassCard>
                 </div>
-
-                <div className="space-y-6">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-white/20 ml-2">Einzelnoten</p>
-                  <div className="grid gap-4 max-h-[600px] overflow-y-auto pr-2 no-scrollbar">
-                    {activeSubjectData?.semesterGrades.sort((a,b) => new Date(b.date) - new Date(a.date)).map((g) => (
-                      <div key={g.id} onClick={() => { setGradeForm(g); setIsGradeModalOpen(true); }} className="bg-[#1c1c1e]/60 backdrop-blur-md border border-white/5 p-5 rounded-[2rem] flex justify-between items-center cursor-pointer hover:bg-white/10 transition-all shadow-lg">
-                        <div className="flex items-center space-x-4">
-                          <div className="w-12 h-12 rounded-[1rem] flex items-center justify-center font-black text-xl ring-1 ring-white/10" style={{ backgroundColor: `${selectedSubject.color}15`, color: g.points >= 10 ? '#4ade80' : g.points >= 5 ? '#fb923c' : '#f87171' }}>{g.points}</div>
-                          <div className="truncate max-w-[150px]">
-                            <p className="font-extrabold text-sm truncate">{g.type}</p>
-                            <p className="text-[9px] text-white/20 uppercase font-black tracking-widest">{new Date(g.date).toLocaleDateString('de-DE')}</p>
-                          </div>
+                
+                <div className="space-y-4">
+                    <p className="text-[10px] font-black uppercase text-white/20">Notenliste</p>
+                    {activeSubjectData?.semesterGrades.map(g => (
+                        <div key={g.id} className="bg-white/5 p-4 rounded-2xl flex justify-between items-center">
+                            <span className="text-2xl font-black">{g.points}</span>
+                            <span className="text-xs text-white/40">{g.type}</span>
                         </div>
-                        <ChevronRight size={16} className="text-white/10" />
-                      </div>
                     ))}
-                    <button onClick={() => setIsGradeModalOpen(true)} className="w-full py-6 border-2 border-dashed border-white/5 rounded-[2rem] text-white/20 font-black uppercase tracking-widest hover:border-white/10 hover:text-white/40 transition-all flex items-center justify-center gap-3 bg-white/5"><Plus size={18} /> Note hinzufügen</button>
-                  </div>
+                    <button onClick={() => setIsGradeModalOpen(true)} className="w-full py-4 border-2 border-dashed border-white/10 rounded-2xl text-white/20 hover:text-white transition-all">+ Note</button>
                 </div>
               </div>
             </div>
           ) : (
-            <>
-              {currentTab === 'home' && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                  <div className="lg:col-span-5 space-y-8">
-                    <AppleGlassCard className="text-center py-16 bg-gradient-to-br from-[#1c1c1e] to-indigo-500/10 border-indigo-500/20 shadow-2xl">
-                      <p className="text-[11px] font-black uppercase tracking-[0.4em] text-white/20 mb-4">Gesamt-Durchschnitt (LK gewichtet)</p>
-                      <div className="text-9xl font-black tracking-tighter leading-none bg-gradient-to-b from-white to-white/40 bg-clip-text text-transparent">{processedData.avgPoints.toFixed(1)}</div>
-                      {processedData.avgGrade && <div className="text-3xl font-black text-indigo-400 mt-4">Abischnitt: {processedData.avgGrade.toFixed(2)}</div>}
-                    </AppleGlassCard>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <AppleGlassCard className="py-8 text-center border-t-4 border-t-emerald-500/50">
-                        <Zap size={20} className="mx-auto text-emerald-400 mb-2" />
-                        <p className="text-[9px] font-black uppercase tracking-widest text-white/20">Top Fach</p>
-                        <p className="text-sm font-black mt-2 truncate px-2">{processedData.semesterSubjects.sort((a,b) => (b.finalPoints || 0) - (a.finalPoints || 0))[0]?.name || '-'}</p>
-                      </AppleGlassCard>
-                      <AppleGlassCard className="py-8 text-center border-t-4 border-t-indigo-500/50">
-                        <TrendingUp size={20} className="mx-auto text-indigo-400 mb-2" />
-                        <p className="text-[9px] font-black uppercase tracking-widest text-white/20">LK-Bonus</p>
-                        <p className="text-2xl font-black mt-1">Aktiv</p>
-                      </AppleGlassCard>
-                    </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {processedData.semesterSubjects.map(s => (
+                <AppleGlassCard key={s.id} onClick={() => setSelectedSubject(s)} style={{ borderTop: `4px solid ${s.color}` }}>
+                  <div className="flex justify-between items-start">
+                    <h3 className="text-2xl font-black">{s.name}</h3>
+                    <span className="text-3xl font-black" style={{ color: s.color }}>{s.finalPoints?.toFixed(0) || '-'}</span>
                   </div>
-
-                  <div className="lg:col-span-7 space-y-6">
-                    <div className="flex justify-between items-center px-4">
-                      <h2 className="text-xl font-black uppercase tracking-widest text-white/40">Fokus</h2>
-                    </div>
-                    <div className="grid gap-4">
-                      {processedData.semesterSubjects.slice(0, 4).map(s => (
-                        <AppleGlassCard key={s.id} onClick={() => setSelectedSubject(s)} className="flex justify-between items-center py-6">
-                           <div className="flex items-center space-x-4">
-                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: s.color }} />
-                              <div className="flex flex-col">
-                                <span className="text-xl font-bold">{s.name}</span>
-                                <span className="text-[9px] font-black uppercase text-white/20">{s.isLK ? 'Leistungskurs' : 'Grundkurs'}</span>
-                              </div>
-                           </div>
-                           <div className="flex items-center space-x-6">
-                              <span className="text-2xl font-black">{s.finalPoints?.toFixed(0) || '-'}</span>
-                              <ChevronRight size={20} className="text-white/10" />
-                           </div>
-                        </AppleGlassCard>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {currentTab === 'subjects' && (
-                <div className="space-y-8">
-                  <div className="flex justify-between items-center px-4">
-                    <h2 className="text-3xl font-black">Fächer</h2>
-                    <button onClick={() => setIsSubjectModalOpen(true)} className="p-4 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-all shadow-xl">
-                      <Plus size={22} className="text-indigo-400" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {processedData.semesterSubjects.map((s) => (
-                      <AppleGlassCard key={s.id} onClick={() => setSelectedSubject(s)} className="h-48 flex flex-col justify-between" style={{ borderTop: `6px solid ${s.color}` }}>
-                        <div className="flex justify-between">
-                          <div className="flex flex-col">
-                            <h3 className="text-2xl font-black">{s.name}</h3>
-                            <span className="text-[9px] font-black uppercase text-white/40 tracking-widest">{s.isLK ? 'LK (2x)' : 'GK'} • {s.examWeight}% Klausur</span>
-                          </div>
-                          <span className="text-3xl font-black" style={{ color: s.color }}>{s.finalPoints?.toFixed(0) || '-'}</span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                          <span className="text-[10px] font-black uppercase text-white/20 tracking-widest">{s.semesterGrades.length} Noten</span>
-                          <div className="bg-white/5 p-2 rounded-xl text-indigo-400"><Plus size={16}/></div>
-                        </div>
-                      </AppleGlassCard>
-                    ))}
-                    <button onClick={() => setIsSubjectModalOpen(true)} className="h-48 border-2 border-dashed border-white/10 rounded-[2.5rem] flex flex-col items-center justify-center text-white/20 hover:text-white/40 hover:bg-white/5 transition-all">
-                      <Plus size={32} className="mb-2" />
-                      <span className="font-black uppercase text-[10px] tracking-widest">Neues Fach</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {currentTab === 'stats' && (
-                <div className="space-y-10">
-                   <h2 className="text-3xl font-black px-4">Analyse</h2>
-                   <div className="max-w-4xl mx-auto">
-                     <AppleGlassCard className="p-10">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-white/20 mb-8 flex items-center gap-2">
-                           <LayoutGrid size={14} className="text-indigo-400" /> Punkte-Verteilung (Anzahl der Noten)
-                        </p>
-                        <div className="h-80">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={processedData.pointsDistribution}>
-                              <XAxis dataKey="points" axisLine={false} tickLine={false} tick={{fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 'bold'}} dy={10} />
-                              <YAxis axisLine={false} tickLine={false} tick={{fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 'bold'}} />
-                              <Tooltip 
-                                cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                                contentStyle={{ backgroundColor: '#1c1c1e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', fontSize: '12px', fontWeight: 'bold' }} 
-                              />
-                              <Bar dataKey="count" radius={[10, 10, 0, 0]}>
-                                {processedData.pointsDistribution.map((entry, index) => (
-                                  <Cell key={index} fill={entry.points >= 10 ? '#4ade80' : entry.points >= 5 ? '#f59e0b' : '#ef4444'} />
-                                ))}
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                     </AppleGlassCard>
-                   </div>
-                </div>
-              )}
-            </>
+                  <p className="text-[10px] text-white/30 mt-2">{s.isLK ? 'LK' : 'GK'} • {s.semesterGrades.length} Noten</p>
+                </AppleGlassCard>
+              ))}
+              <button onClick={() => setIsSubjectModalOpen(true)} className="h-40 border-2 border-dashed border-white/10 rounded-[2.5rem] flex flex-col items-center justify-center text-white/20 hover:bg-white/5 transition-all">
+                <Plus size={32} />
+              </button>
+            </div>
           )}
         </main>
 
-        {/* NAVIGATION MENÜ */}
-        <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-sm">
-          <div className="bg-[#1c1c1e]/90 backdrop-blur-2xl border border-white/10 rounded-[2.8rem] p-2 shadow-[0_25px_80px_rgba(0,0,0,0.7)] flex items-center justify-around ring-1 ring-white/5">
-            {[
-              { id: 'home', icon: Home, label: 'Home' },
-              { id: 'subjects', icon: LayoutGrid, label: 'Fächer' },
-              { id: 'stats', icon: TrendingUp, label: 'Analyse' }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => { setCurrentTab(tab.id); setSelectedSubject(null); }}
-                className={`flex items-center space-x-3 px-6 py-4 rounded-[2.2rem] transition-all duration-500 relative group ${currentTab === tab.id ? 'bg-white text-black scale-105 shadow-xl' : 'text-white/40 hover:text-white/60'}`}
-              >
-                <tab.icon size={22} className={`${currentTab === tab.id ? 'scale-110' : 'group-hover:scale-110'} transition-transform`} />
-                {currentTab === tab.id && <span className="text-[11px] font-black uppercase tracking-widest hidden md:block">{tab.label}</span>}
-              </button>
-            ))}
-          </div>
-        </nav>
-
-        {/* Modale */}
-        <Modal isOpen={isSubjectModalOpen || isSettingsModalOpen} onClose={() => { setIsSubjectModalOpen(false); setIsSettingsModalOpen(false); }} title={isSettingsModalOpen ? "Fach bearbeiten" : "Neues Fach"}>
-          <div className="space-y-8">
-            <input className="w-full bg-white/5 border border-white/10 rounded-[2rem] p-6 text-xl font-black" value={subjectForm.name} onChange={e => setSubjectForm({...subjectForm, name: e.target.value})} placeholder="Name des Fachs" />
-            
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-6 bg-white/5 rounded-[2rem]">
-                <div className="flex flex-col">
-                  <span className="text-lg font-bold">Leistungskurs</span>
-                  <span className="text-[10px] text-white/30 uppercase font-black">Zählt doppelt (2x)</span>
-                </div>
-                <AppleToggle enabled={subjectForm.isLK} setEnabled={(val) => setSubjectForm({...subjectForm, isLK: val})} />
-              </div>
-
-              <div className="p-6 bg-white/5 rounded-[2rem] space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sliders size={18} className="text-indigo-400" />
-                    <span className="text-lg font-bold">Gewichtung</span>
-                  </div>
-                  <span className="text-indigo-400 font-black">{subjectForm.examWeight}% Klausur</span>
-                </div>
-                <input 
-                  type="range" 
-                  min="20" 
-                  max="80" 
-                  step="5"
-                  value={subjectForm.examWeight} 
-                  onChange={(e) => setSubjectForm({...subjectForm, examWeight: parseInt(e.target.value)})}
-                  className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-                <div className="flex justify-between text-[10px] font-black text-white/20 uppercase tracking-widest">
-                  <span>Mehr Sonstiges ({100 - subjectForm.examWeight}%)</span>
-                  <span>Mehr Klausur ({subjectForm.examWeight}%)</span>
-                </div>
-              </div>
+        {/* Modale (vereinfacht für das Beispiel) */}
+        <Modal isOpen={isSubjectModalOpen} onClose={() => setIsSubjectModalOpen(false)} title="Neues Fach">
+          <div className="space-y-6">
+            <input className="w-full bg-white/5 border border-white/10 rounded-2xl p-4" placeholder="Fachname" value={subjectForm.name} onChange={e => setSubjectForm({...subjectForm, name: e.target.value})} />
+            <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl">
+                <span>Leistungskurs?</span>
+                <AppleToggle enabled={subjectForm.isLK} setEnabled={v => setSubjectForm({...subjectForm, isLK: v})} />
             </div>
-
-            <div className="grid grid-cols-5 gap-3 px-2">
-              {SUBJECT_COLORS.map(c => (
-                <button key={c} onClick={() => setSubjectForm({...subjectForm, color: c})} className={`w-full aspect-square rounded-xl transition-all ${subjectForm.color === c ? 'ring-4 ring-white/40 scale-110' : 'opacity-40'}`} style={{backgroundColor: c}} />
-              ))}
-            </div>
-
-            <div className="pt-4 space-y-4">
-              <button onClick={handleSaveSubject} className="w-full bg-white text-black py-6 rounded-[2rem] font-black uppercase tracking-widest shadow-2xl">Speichern</button>
-              {isSettingsModalOpen && <button onClick={handleDeleteSubject} className="w-full text-red-500 font-black uppercase text-xs tracking-widest py-2">Fach löschen</button>}
-            </div>
+            <button onClick={handleSaveSubject} className="w-full bg-indigo-600 py-4 rounded-2xl font-black">SPEICHERN</button>
           </div>
         </Modal>
 
         <Modal isOpen={isGradeModalOpen} onClose={() => setIsGradeModalOpen(false)} title="Note eintragen">
-          <div className="space-y-10">
-            <div className="flex flex-col items-center">
-              <div className="flex items-center space-x-10">
-                <button onClick={() => setGradeForm({...gradeForm, points: Math.max(0, gradeForm.points - 1)})} className="w-14 h-14 rounded-full bg-white/5 border border-white/10 text-2xl">-</button>
-                <span className="text-9xl font-black">{gradeForm.points}</span>
-                <button onClick={() => setGradeForm({...gradeForm, points: Math.min(15, gradeForm.points + 1)})} className="w-14 h-14 rounded-full bg-white/5 border border-white/10 text-2xl">+</button>
-              </div>
+            <div className="space-y-6">
+                <div className="text-center text-6xl font-black mb-4">{gradeForm.points}</div>
+                <input type="range" min="0" max="15" value={gradeForm.points} onChange={e => setGradeForm({...gradeForm, points: parseInt(e.target.value)})} className="w-full" />
+                <button onClick={handleSaveGrade} className="w-full bg-indigo-600 py-4 rounded-2xl font-black">OK</button>
             </div>
-            <div className="flex bg-white/5 p-1 rounded-[2rem]">
-                 {Object.values(GRADE_TYPES).map(t => (
-                   <button key={t} onClick={() => setGradeForm({...gradeForm, type: t})} className={`flex-1 py-4 rounded-[1.8rem] text-[10px] font-black uppercase tracking-widest transition-all ${gradeForm.type === t ? 'bg-white text-black' : 'text-white/20'}`}>{t}</button>
-                 ))}
-            </div>
-            <button onClick={handleSaveGrade} className="w-full bg-indigo-600 py-6 rounded-[2rem] font-black uppercase tracking-widest shadow-xl">Speichern</button>
-          </div>
         </Modal>
 
       </div>
